@@ -14,6 +14,7 @@ class Model():
     def __init__(self, mplan: float, fargodir: str, nout: str|int):
         self.fargodir = fargodir
         self.nout = str(nout)
+        self.mplan = mplan
 
         self.read_domain()
 
@@ -254,6 +255,54 @@ class Model():
 
         return ax,ay,az
     
+    def interp_particle_acceleration(self, s: float, vel: tuple[float, float, float], cartpos: tuple[float, float, float]):
+        vx,vy,vz = vel
+        x,y,z = cartpos
+        r = np.sqrt(x*x + y*y)
+        domain = (self.phi_centers, self.r_centers, self.theta_centers)
+
+        rho_g = interp3d(self.rhogrid, domain, cartpos)
+        gasvx = interp3d(self.gasvx, domain, cartpos)
+        gasvy = interp3d(self.gasvy, domain, cartpos)
+        gasvz = interp3d(self.gasvz, domain, cartpos, flip=True)
+        cs = self.get_soundspeed(x,y,z)
+        tstop = (s*self.rho_s)/(cs*rho_g)
+        invts = 1/tstop
+
+        x_sun, y_sun, z_sun = self.sun_pos
+        x_pl, y_pl, z_pl = self.planet_pos
+        d = np.sqrt( (x-x_sun)**2 + (y-y_sun)**2 + (z-z_sun)**2 )
+        GSUN = self.G*self.M_sun/d/d/d
+        Gx = GSUN*(x-x_sun)
+        Gy = GSUN*(y-y_sun)
+        Gz = GSUN*(z-z_sun)
+        dp = np.sqrt( (x-x_pl)**2 + (y-y_pl)**2 + (z-z_pl)**2 )
+        GPLAN = self.G*self.M_pl/dp/dp/dp
+        Gpx = GPLAN*(x-x_pl)
+        Gpy = GPLAN*(y-y_pl)
+        Gpz = GPLAN*(z-z_pl)
+
+        vphi = (x*vy - y*vx)/r
+        ax = (
+            invts*gasvx - invts*vx
+            - Gx - Gpx
+            + 2*vy*self.omegaframe + x*self.omegaframe*self.omegaframe
+            + vphi*vphi/r/r*x
+        )
+        ay = (
+            invts*gasvy - invts*vy
+            - Gy - Gpy
+            + -2*vx*self.omegaframe + y*self.omegaframe*self.omegaframe
+            + vphi*vphi/r/r*y
+        )
+        az = (
+            invts*gasvz - invts*vz
+            - Gz - Gpz
+        )
+
+        return ax,ay,az
+
+    
     def get_particle_jacobian(self, s: float, vel: tuple[float, float, float], idx: tuple[int, int, int]):
         vx, vy, vz = vel
         i,j,k = idx 
@@ -266,6 +315,37 @@ class Model():
         r3 = r*r*r
 
         rho_g = self.rhogrid[slice]
+        cs = self.get_soundspeed(x,y,z)
+        tstop = (s*self.rho_s)/(cs*rho_g)
+        invts = 1/tstop
+
+        vphi = (x*vy - y*vx)/r
+
+        daxdvx = -invts - 2*x*y*vphi/r3
+        daxdvy = 2*self.omegaframe + 2*x*x*vphi/r3
+        daxdvz = 0.0
+
+        daydvx = -2*self.omegaframe - 2*y*y*vphi/r3
+        daydvy = -invts + 2*y*x*vphi/r3
+        daydvz = 0.0
+
+        dazdvx = 0.0
+        dazdvy = 0.0
+        dazdvz = -invts
+
+        return np.array([[daxdvx, daxdvy, daxdvz],
+                         [daydvx, daydvy, daydvz],
+                         [dazdvx, dazdvy, dazdvz]],
+                         dtype=np.double)
+
+    def interp_particle_jacobian(self, s: float, vel: tuple[float, float, float], cartpos: tuple[float, float, float]):
+        vx,vy,vz = vel
+        x,y,z = cartpos
+        r = np.sqrt(x*x + y*y)
+        r3 = r*r*r
+        domain = (self.phi_centers, self.r_centers, self.theta_centers)
+
+        rho_g = interp3d(self.rhogrid, domain, cartpos)
         cs = self.get_soundspeed(x,y,z)
         tstop = (s*self.rho_s)/(cs*rho_g)
         invts = 1/tstop

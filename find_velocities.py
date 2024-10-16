@@ -38,13 +38,13 @@ def main(alpha: int = 3, mplan: int=300, distro: str='',
     print(f'Using fargo directory:\n    {fargodir}')
     model = Model(mplan, fargodir, nout)
     print('Solving...')
-    velocities = midplane_solver(model,grainsize,verbose=verbose)
+    velocities = rz_solver(model,grainsize,verbose=verbose)
     print('Done!')
     if output=='':
         output = f'outputs/alpha{alpha}_mplan{mplan}'
         if distro!='':
             output += f'_{distro}'
-        output+=f'/grain{grainsize}_velocities.npz'
+        output+=f'/grain{grainsize}_rz.npz'
     make_directory(output)
     print(f'Saving output to:\n    {output}')
     np.savez(output, vx=velocities[0], vy=velocities[1], vz=velocities[2], x=model.xx, y=model.yy, z=model.zz)

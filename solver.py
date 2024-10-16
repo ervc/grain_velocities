@@ -1,4 +1,5 @@
 from model import Model
+from interpolation import interp3d
 
 import numpy as np
 
@@ -57,6 +58,100 @@ def get_vel0(model: Model, s: float, idx: tuple[int, int, int]):
 
     return vx0, vy0, vz0
 
+def interp_vel0(model: Model, s: float, cartpos: tuple[float, float, float]):
+    x,y,z = cartpos
+    r = np.sqrt(x*x + y*y)
+    phi = np.arctan2(y,x)
+    domain = (model.phi_centers, model.r_centers, model.theta_centers)
+
+
+    rho_g = interp3d(model.rhogrid, domain, cartpos)
+    cs = model.get_soundspeed(x,y,z)
+    tstop = (s*model.rho_s)/(cs*rho_g)
+
+    vkep_norot = np.sqrt(model.G*model.M_sun/r)
+    Omega = vkep_norot/r
+    Stokes = tstop*Omega
+
+    x_sun, y_sun, z_sun = model.sun_pos
+    x_pl, y_pl, z_pl = model.planet_pos
+
+    d = np.sqrt( (x-x_sun)**2 + (y-y_sun)**2 + (z-z_sun)**2 )
+    GSUN = model.G*model.M_sun/d/d/d
+    Gx = GSUN*(x-x_sun)
+    Gy = GSUN*(y-y_sun)
+    Gz = GSUN*(z-z_sun)
+    dp = np.sqrt( (x-x_pl)**2 + (y-y_pl)**2 + (z-z_pl)**2 )
+    GPLAN = model.G*model.M_pl/dp/dp/dp
+    Gpx = GPLAN*(x-x_pl)
+    Gpy = GPLAN*(y-y_pl)
+    Gpz = GPLAN*(z-z_pl)
+
+    gasvphi = interp3d(model.gasvphi, domain, cartpos)
+    gasvr = interp3d(model.gasvr, domain, cartpos)
+    gasvx = interp3d(model.gasvx, domain, cartpos)
+    gasvy = interp3d(model.gasvy, domain, cartpos)
+    gasvz = interp3d(model.gasvz, domain, cartpos, flip=True)
+
+    eta = 1 - ((gasvphi+r*model.omegaframe)/vkep_norot)**2
+    vr0 = (gasvr - eta*Stokes*vkep_norot)/(1+Stokes*Stokes)
+    vp0 = gasvphi - 0.5*Stokes*vr0
+
+    armvr = vr0
+    armvphi = vp0
+    armvx = armvr*np.cos(phi) - armvphi*np.sin(phi)
+    armvy = armvr*np.sin(phi) + armvphi*np.cos(phi)
+    acent = armvphi*armvphi/r/r
+
+    vx0 = gasvx + tstop*(-Gx - Gpx + 2*armvy*model.omegaframe + x*model.omegaframe*model.omegaframe + x*acent)
+    vy0 = gasvy + tstop*(-Gy - Gpy - 2*armvx*model.omegaframe + y*model.omegaframe*model.omegaframe + y*acent)
+    vz0 = gasvz + tstop*(-Gz - Gpz)
+
+    return vx0, vy0, vz0
+
+def interp_NewtSolve(model: Model, s: float, cartpos: tuple[float, float, float],
+                     vel0 = None, debug: bool=False
+                     ):
+    x,y,z = cartpos
+    if vel0 is None:
+        vx,vy,vz = interp_vel0(model, s, cartpos)
+    else:
+        vx,vy,vz = vel0
+    for n in range(ntrial):
+        if debug:
+            print(f'{n, vx, vy, vz = }')
+        ax,ay,az = model.interp_particle_acceleration(s, (vx,vy,vz), cartpos) # find the accelerations
+        if debug:
+            print(f'{n, ax, ay, az = }')
+        errf = np.abs(ax) + np.abs(ay) + np.abs(az)
+        if errf<tolf:
+            if debug:
+                print(f'errf<tolf, {errf = }, {tolf = }')
+            return n, (vx,vy,vz)
+        jac = model.interp_particle_jacobian(s, (vx,vy,vz), cartpos)
+        A = np.array([ax,ay,az],dtype=np.double)
+        dv = linalg.solve(jac,-A)
+        # errx = np.abs(dv[0]/vx)+np.abs(dv[1]/vy)+np.abs(dv[2]/vz)
+        vx += dv[0]
+        vy += dv[1]
+        vz += dv[2]
+        errx = 0
+        if abs(vx) > tolx:
+            errx += np.abs(dv[0]/vx)
+        if abs(vy) > tolx:
+            errx += np.abs(dv[1]/vy)
+        if abs(vz) > tolx:
+            errx += np.abs(dv[2]/vz)
+        if errx < tolx:
+            if debug:
+                print(f'errx<tolx, {errx = }, {tolx = }')
+            return n, (vx,vy,vz)
+        
+    print(f'size {s} DID NOT CONVERGE, {errf = }, {errx = }')
+    print(f'{vx, vy, vz = }')
+    print(f'{ax, ay, az = }')
+    print(f'{dv = }')
+    return n, (vx,vy,vz)
 
 def NDNewtSolve(model: Model, s: float, idx: tuple[int, int, int],
                 vel0 = None,

@@ -6,7 +6,7 @@ class InterpolationError(Warning):
 class OutOfBoundsError(Warning):
     pass
 
-def interp3d(arr: npt.NDArray, domain: tuple[npt.NDArray,...], coords: tuple[float,...]) -> float:
+def interp3d(arr: npt.NDArray, domain: tuple[npt.NDArray,...], coords: tuple[float,...], flip=False) -> float:
     phicenters, rcenters, thetacenters = domain
     nx = len(phicenters)
     ny = len(rcenters)
@@ -28,7 +28,7 @@ def interp3d(arr: npt.NDArray, domain: tuple[npt.NDArray,...], coords: tuple[flo
     if (r<rcenters[0] or r>rcenters[-1]):
         raise OutOfBoundsError("R is out of bounds on interpolation")
     if theta < thetacenters[0]:
-        raise OutOfBoundsError("Theta is out of bounds")
+        raise OutOfBoundsError(f"Theta is out of bounds, {theta = }")
     
     if phi < phicenters[0]:
         i = nx-1
@@ -43,10 +43,11 @@ def interp3d(arr: npt.NDArray, domain: tuple[npt.NDArray,...], coords: tuple[flo
             break
     j-=1
     if theta > thetacenters[-1]:
-        k = nz-1
-    for k in range(nz):
-        if thetacenters[k] < theta:
-            break
+        k = nz
+    else:
+        for k in range(nz):
+            if thetacenters[k] > theta:
+                break
     k-=1
 
     if i==nx-1:
@@ -73,6 +74,39 @@ def interp3d(arr: npt.NDArray, domain: tuple[npt.NDArray,...], coords: tuple[flo
         y1 = rcenters[jp]
         z0 = thetacenters[k]
         z1 = thetacenters[kp]
+
+        xd = (phi-x0)/(x1-x0)
+        yd = (r-y0)/(y1-y0)
+        zd = (theta-z0)/(z1-z0)
+
+        c00 = c000*(1-xd)+c100*xd
+        c01 = c001*(1-xd)+c101*xd
+        c10 = c010*(1-xd)+c110*xd
+        c11 = c011*(1-xd)+c111*xd
+
+        c0 = c00*(1-yd)+c10*yd
+        c1 = c01*(1-yd)+c11*yd
+
+        return c0*(1-zd)+c1*zd
+    elif k==nz-1 and flip:
+        # 3d interpolation with z component flipped across midplane
+        kp = k
+        c000 = arr[k ,j ,i ]
+        c100 = arr[k ,j ,ip]
+        c010 = arr[k ,jp,i ]
+        c110 = arr[k ,jp,ip]
+        c001 = -arr[kp,j ,i ]
+        c101 = -arr[kp,j ,ip]
+        c011 = -arr[kp,jp,i ]
+        c111 = -arr[kp,jp,ip]
+        x0 = phicenters[i ]
+        x1 = phicenters[ip]
+        if ip==0:
+            x1+=2*np.pi
+        y0 = rcenters[j]
+        y1 = rcenters[jp]
+        z0 = thetacenters[k]
+        z1 = np.pi-thetacenters[kp]
 
         xd = (phi-x0)/(x1-x0)
         yd = (r-y0)/(y1-y0)
